@@ -1,14 +1,29 @@
-import React, { useState } from 'react';
-import { Play, Square, FastForward, CheckCircle2, AlertTriangle, Terminal, Cpu, FileCode, Plus, Layers, ShieldCheck } from 'lucide-react';
+import React, { useState, useEffect } from 'react';
+import { Play, Square, FastForward, CheckCircle2, AlertTriangle, Terminal, Cpu, FileCode, Plus, Layers, ShieldCheck, Usb } from 'lucide-react';
 import { PRESET_MACROS, MacroRecipe, MacroStep, macroEngine } from '../services/macro-engine';
+import { toolBridge, ConnectedDeviceInfo } from '../services/tool-integration-bridge';
 import { useI18n } from '../context/I18nContext';
 
 export const MacroAutomationStudio: React.FC<{ onLog?: (msg: string) => void }> = ({ onLog }) => {
   const { isRTL } = useI18n();
+  const [activeDevice, setActiveDevice] = useState<ConnectedDeviceInfo>(toolBridge.getConnectedDevice());
   const [selectedMacro, setSelectedMacro] = useState<MacroRecipe>(PRESET_MACROS[0]);
   const [isRunning, setIsRunning] = useState(false);
   const [executionLogs, setExecutionLogs] = useState<string[]>([]);
   const [stepsState, setStepsState] = useState<MacroStep[]>(PRESET_MACROS[0].steps);
+
+  useEffect(() => {
+    const unsubscribe = toolBridge.subscribeDeviceConnection((device) => {
+      setActiveDevice(device);
+      if (device.isConnected) {
+        setExecutionLogs(prev => [
+          ...prev,
+          `[AUTO-READ] Target Phone Sync: ${device.vendorName} ${device.productName} (${device.serial}) via ${device.connectionType}`
+        ]);
+      }
+    });
+    return () => unsubscribe();
+  }, []);
 
   const handleSelectMacro = (macro: MacroRecipe) => {
     if (isRunning) return;
@@ -63,6 +78,13 @@ export const MacroAutomationStudio: React.FC<{ onLog?: (msg: string) => void }> 
             </p>
           </div>
         </div>
+
+        {activeDevice.isConnected && (
+          <div className="flex items-center gap-2 px-3 py-1.5 bg-cyan-500/10 border border-cyan-500/30 rounded-lg text-xs font-mono text-cyan-300">
+            <Usb className="w-4 h-4 text-cyan-400 animate-pulse" />
+            <span>{isRTL ? 'قراءة تلقائية للهاتف الموصل:' : 'Auto-Read Target:'} <strong>{activeDevice.vendorName} {activeDevice.productName}</strong> ({activeDevice.serial})</span>
+          </div>
+        )}
 
         <div className="flex items-center gap-2">
           {!isRunning ? (

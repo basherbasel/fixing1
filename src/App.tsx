@@ -33,6 +33,7 @@ import {
   MapPin,
   Globe,
   Wifi,
+  Radio,
   ChevronRight,
   Settings,
   Flame,
@@ -71,6 +72,8 @@ import { MasterPrivilegeAuditStudio } from './components/MasterPrivilegeAuditStu
 import { MacroAutomationStudio } from './components/MacroAutomationStudio';
 import { ChipStencilInspector } from './components/ChipStencilInspector';
 import { FirmwareDecryptorStudio } from './components/FirmwareDecryptorStudio';
+import { CloudDrmConnectivityStudio } from './components/CloudDrmConnectivityStudio';
+import { toolBridge, ConnectionType } from './services/tool-integration-bridge';
 import { useI18n } from './context/I18nContext';
 import { GlobalModelDatabase, DeviceModelProfile } from './services/model-database';
 import { cloudLoader } from './services/cloud-loader';
@@ -87,7 +90,7 @@ export default function App() {
   const [selectedModel, setSelectedModel] = useState<DeviceModelProfile | null>(null);
 
   // Navigation
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'oneclick' | 'globalrepair' | 'masteraudit' | 'software' | 'hardware' | 'intelligence' | 'security' | 'repair' | 'infrastructure' | 'macro' | 'stencil' | 'firmware' | 'era' | 'reports'>('oneclick');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'oneclick' | 'globalrepair' | 'masteraudit' | 'software' | 'hardware' | 'intelligence' | 'security' | 'repair' | 'infrastructure' | 'macro' | 'stencil' | 'firmware' | 'clouddrm' | 'era' | 'reports'>('oneclick');
 
   useEffect(() => {
     const initApp = async () => {
@@ -114,7 +117,7 @@ export default function App() {
 
   // Hardware State
   const [isConnected, setIsConnected] = useState<boolean>(false);
-  const [connectionType, setConnectionType] = useState<'WebUSB Fastboot' | 'WebUSB ADB' | 'Web Serial COM' | 'None'>('None');
+  const [connectionType, setConnectionType] = useState<ConnectionType>('None');
   const [deviceInfo, setDeviceInfo] = useState<{
     vendorName?: string;
     productName?: string;
@@ -205,22 +208,72 @@ export default function App() {
       addLog(`[USB] ${claimResult}`);
 
       const hwMatch = identifyHardwareSignature(device.vendorId, device.productId);
-      setDeviceInfo({
+      const devObj = {
         vendorName: device.manufacturerName || (hwMatch ? hwMatch.vendorName : 'Android Device'),
         productName: device.productName || 'Android Fastboot Target',
         vid: `0x${device.vendorId.toString(16).padStart(4, '0').toUpperCase()}`,
         pid: `0x${device.productId.toString(16).padStart(4, '0').toUpperCase()}`,
         serial: device.serialNumber || 'FASTBOOT-ONLINE',
         hardwareMatch: hwMatch,
-      });
+      };
+      setDeviceInfo(devObj);
 
       setIsConnected(true);
       setConnectionType('WebUSB Fastboot');
+
+      toolBridge.broadcastDeviceConnection({
+        isConnected: true,
+        connectionType: 'WebUSB Fastboot',
+        vendorName: devObj.vendorName,
+        productName: devObj.productName,
+        vid: devObj.vid,
+        pid: devObj.pid,
+        serial: devObj.serial,
+        chipset: hwMatch ? hwMatch.notes : 'Qualcomm Snapdragon / MediaTek BROM',
+        storageType: 'UFS 4.0 / eMMC Flash'
+      });
+
       addLog('[SUCCESS] Fastboot Bulk Communication Established! Querying basic variables...');
 
       await queryFastbootVariables();
     } catch (err: any) {
       addLog(`[ERROR] USB Connection Failed: ${err.message || err}`);
+    }
+  };
+
+  /**
+   * Force Auto-Connect & USB Hotplug Binding Engine
+   * Binds connected phone across ALL 32+ repair tools when computer/browser hasn't auto-read it
+   */
+  const handleForceAutoConnect = async () => {
+    try {
+      addLog('[USB-AUTO-HOOK] Initiating Force USB Bus Scan & Device Driver Hook...');
+      const dev = await toolBridge.triggerAutoScanAllModes();
+      
+      setIsConnected(true);
+      setConnectionType(dev.connectionType || 'Auto-Discovered Device');
+      setDeviceInfo({
+        vendorName: dev.vendorName,
+        productName: dev.productName,
+        vid: dev.vid,
+        pid: dev.pid,
+        serial: dev.serial,
+        hardwareMatch: {
+          vendorName: dev.vendorName,
+          mode: dev.connectionType,
+          chipset: dev.chipset,
+          category: 'fastboot',
+          notes: dev.chipset
+        }
+      });
+
+      if (dev.fastbootVars) {
+        setFastbootVars(dev.fastbootVars);
+      }
+
+      addLog(`[SUCCESS] Phone Bound Successfully! Target: ${dev.vendorName} ${dev.productName} (${dev.serial}) via ${dev.connectionType}`);
+    } catch (err: any) {
+      addLog(`[AUTO-CONNECT-ERROR] ${err.message || err}`);
     }
   };
 
@@ -237,17 +290,31 @@ export default function App() {
       addLog(`[ADB] ${claimResult}`);
 
       const hwMatch = identifyHardwareSignature(device.vendorId, device.productId);
-      setDeviceInfo({
+      const devObj = {
         vendorName: device.manufacturerName || (hwMatch ? hwMatch.vendorName : 'Android Manufacturer'),
         productName: device.productName || 'Android ADB Shell Device',
         vid: `0x${device.vendorId.toString(16).padStart(4, '0').toUpperCase()}`,
         pid: `0x${device.productId.toString(16).padStart(4, '0').toUpperCase()}`,
         serial: device.serialNumber || 'ADB-ONLINE',
         hardwareMatch: hwMatch,
-      });
+      };
+      setDeviceInfo(devObj);
 
       setIsConnected(true);
       setConnectionType('WebUSB ADB');
+
+      toolBridge.broadcastDeviceConnection({
+        isConnected: true,
+        connectionType: 'WebUSB ADB',
+        vendorName: devObj.vendorName,
+        productName: devObj.productName,
+        vid: devObj.vid,
+        pid: devObj.pid,
+        serial: devObj.serial,
+        chipset: hwMatch ? hwMatch.notes : 'ARM Cortex-A78 / Snapdragon',
+        storageType: 'UFS 3.1 / UFS 4.0'
+      });
+
       addLog('[SUCCESS] ADB Wire Handshake packet transmitted. Device acknowledged host handshake.');
     } catch (err: any) {
       addLog(`[ERROR] ADB Connection Failed: ${err.message || err}`);
@@ -268,13 +335,26 @@ export default function App() {
       const pid = info.pid ? `0x${info.pid.toString(16).padStart(4, '0').toUpperCase()}` : '0x9008';
       const hwMatch = info.vid && info.pid ? identifyHardwareSignature(info.vid, info.pid) : null;
 
-      setDeviceInfo({
+      const devObj = {
         vendorName: hwMatch ? hwMatch.vendorName : 'Serial Modem/Diag Port',
         productName: hwMatch ? hwMatch.mode : 'COM Virtual Serial Endpoint',
         vid,
         pid,
         serial: 'COM-PORT-DIRECT',
         hardwareMatch: hwMatch,
+      };
+      setDeviceInfo(devObj);
+
+      toolBridge.broadcastDeviceConnection({
+        isConnected: true,
+        connectionType: 'Web Serial COM',
+        vendorName: devObj.vendorName,
+        productName: devObj.productName,
+        vid: devObj.vid,
+        pid: devObj.pid,
+        serial: devObj.serial,
+        chipset: hwMatch ? hwMatch.notes : 'Qualcomm Sahara EDL / MediaTek BROM',
+        storageType: 'Direct NAND / UFS Access'
       });
 
       addLog(`[SERIAL] Connected to Serial port (Baud: 115200). ${hwMatch ? `Identified: ${hwMatch.mode}` : ''}`);
@@ -298,6 +378,17 @@ export default function App() {
     setConnectionType('None');
     setDeviceInfo({});
     setFastbootVars({});
+
+    toolBridge.broadcastDeviceConnection({
+      isConnected: false,
+      connectionType: 'None',
+      vendorName: 'No USB Device Connected',
+      productName: 'Awaiting USB Target',
+      vid: '0x0000',
+      pid: '0x0000',
+      serial: 'DISCONNECTED'
+    });
+
     addLog('[DISCONNECT] Device disconnected. Interfaces safely released.');
   };
 
@@ -542,12 +633,21 @@ export default function App() {
           ) : (
             <div className="flex items-center gap-2">
               <button
+                onClick={handleForceAutoConnect}
+                className="flex items-center gap-1.5 px-3 py-1.5 bg-gradient-to-r from-emerald-600 to-teal-600 hover:from-emerald-500 hover:to-teal-500 text-white text-xs font-bold rounded-lg shadow-lg shadow-emerald-500/20 transition-all border border-emerald-400/30 cursor-pointer animate-pulse"
+                title="Force auto-detect and bind connected phone across all channels (USB/Wi-Fi/BLE)"
+              >
+                <Radio className="w-4 h-4" />
+                <span>{isRTL ? 'اقرأ الهاتف الموصل تلقائياً' : 'Auto-Read Connected Phone'}</span>
+              </button>
+
+              <button
                 onClick={handleConnectWebUSB}
                 className="flex items-center gap-1.5 px-3 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-white text-xs font-semibold rounded-lg shadow-sm transition-colors border border-cyan-400/30 cursor-pointer"
                 title="Connect Android Fastboot over WebUSB (Class 0xFF/0x42/0x03)"
               >
                 <Usb className="w-4 h-4" />
-                Connect Fastboot (WebUSB)
+                Fastboot
               </button>
 
               <button
@@ -739,6 +839,18 @@ export default function App() {
             <span>{isRTL ? 'مفكك تشفير الفيرموير' : 'Firmware Decryptor Studio'}</span>
           </button>
 
+          <button
+            onClick={() => setActiveTab('clouddrm')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              activeTab === 'clouddrm'
+                ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 shadow-sm'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            }`}
+          >
+            <Server className="w-4 h-4 text-indigo-400" />
+            <span>{isRTL ? 'معمارية الاتصال والحماية السحابية' : 'Cloud DRM & Drivers'}</span>
+          </button>
+
           <div className="h-px bg-slate-800/50 my-2 mx-2" />
 
           <button
@@ -824,6 +936,7 @@ export default function App() {
           {activeTab === 'macro' && <MacroAutomationStudio onLog={addLog} />}
           {activeTab === 'stencil' && <ChipStencilInspector onLog={addLog} />}
           {activeTab === 'firmware' && <FirmwareDecryptorStudio onLog={addLog} />}
+          {activeTab === 'clouddrm' && <CloudDrmConnectivityStudio onLog={addLog} />}
           {activeTab === 'era' && (
             <EraBridgeGuideSuite
               addLog={addLog}

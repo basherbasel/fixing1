@@ -2,6 +2,7 @@
  * Sentinel Mobile Studio - Real WebUSB Fastboot & USB Bulk Controller
  * Implements Google Fastboot wire protocol directly over WebUSB endpoints.
  * Standard Fastboot endpoints: Interface Class 0xFF (Vendor Specific), Subclass 0x42, Protocol 0x03.
+ * Includes descriptor listeners & polling-retry logic for OS-level USB handshake timeouts.
  */
 
 export interface FastbootResponse {
@@ -10,12 +11,22 @@ export interface FastbootResponse {
   rawPayload?: Uint8Array;
 }
 
+export interface FastbootRetryConfig {
+  maxRetries?: number;
+  delayMs?: number;
+  timeoutMs?: number;
+  onRetry?: (attempt: number, maxRetries: number, error: Error) => void;
+}
+
 export class RealWebUsbFastboot {
   private device: USBDevice | null = null;
   private interfaceNumber: number = 0;
   private endpointIn: number = 0;
   private endpointOut: number = 0;
   private isConnected: boolean = false;
+  private listenerActive: boolean = false;
+  private onConnectCallback?: (device: USBDevice) => void;
+  private onDisconnectCallback?: (device: USBDevice) => void;
 
   get connected(): boolean {
     return this.isConnected && this.device !== null;
@@ -26,6 +37,88 @@ export class RealWebUsbFastboot {
   }
 
   /**
+   * Helper utility: Promise wrapper with custom timeout to catch stalled USB descriptors
+   */
+  private static async withTimeout<T>(promise: Promise<T>, timeoutMs: number, errorMessage: string): Promise<T> {
+    let timer: any;
+    const timeoutPromise = new Promise<T>((_, reject) => {
+      timer = setTimeout(() => {
+        reject(new Error(`[USB-TIMEOUT] ${errorMessage} (exceeded ${timeoutMs}ms)`));
+      }, timeoutMs);
+    });
+
+    try {
+      const result = await Promise.race([promise, timeoutPromise]);
+      clearTimeout(timer);
+      return result;
+    } catch (err) {
+      clearTimeout(timer);
+      throw err;
+    }
+  }
+
+  /**
+   * Helper utility: Sleep for ms
+   */
+  private static delay(ms: number): Promise<void> {
+    return new Promise((resolve) => setTimeout(resolve, ms));
+  }
+
+  /**
+   * Initialize Global WebUSB Device Descriptor Listener
+   * Automatically intercepts connection / insertion events even if initial handshake timed out.
+   */
+  public startDeviceDescriptorListener(
+    onConnect?: (device: USBDevice) => void,
+    onDisconnect?: (device: USBDevice) => void
+  ): void {
+    if (!navigator.usb) {
+      console.warn('[WebUSB-Fastboot] navigator.usb unavailable for descriptor listener');
+      return;
+    }
+
+    this.onConnectCallback = onConnect;
+    this.onDisconnectCallback = onDisconnect;
+
+    if (this.listenerActive) return;
+
+    const usb = navigator.usb as any;
+    usb.addEventListener('connect', this.handleUsbConnect);
+    usb.addEventListener('disconnect', this.handleUsbDisconnect);
+    this.listenerActive = true;
+    console.log('[+] [WebUSB-Fastboot] Device Descriptor Listener active. Watching for USB hotplug events...');
+  }
+
+  public stopDeviceDescriptorListener(): void {
+    if (navigator.usb && this.listenerActive) {
+      const usb = navigator.usb as any;
+      usb.removeEventListener('connect', this.handleUsbConnect);
+      usb.removeEventListener('disconnect', this.handleUsbDisconnect);
+      this.listenerActive = false;
+    }
+  }
+
+  private handleUsbConnect = async (event: any) => {
+    const dev: USBDevice = event.device;
+    console.log('[+] [WebUSB-Fastboot] USB Device Descriptor attached:', dev?.productName || 'Unknown Fastboot Target');
+    if (this.onConnectCallback && dev) {
+      this.onConnectCallback(dev);
+    }
+  };
+
+  private handleUsbDisconnect = (event: any) => {
+    const dev: USBDevice = event.device;
+    console.log('[-] [WebUSB-Fastboot] USB Device Descriptor detached:', dev?.productName || 'Device');
+    if (this.device === dev) {
+      this.isConnected = false;
+      this.device = null;
+    }
+    if (this.onDisconnectCallback && dev) {
+      this.onDisconnectCallback(dev);
+    }
+  };
+
+  /**
    * Request native browser WebUSB prompt for user permission
    */
   async requestDevice(): Promise<USBDevice> {
@@ -33,7 +126,6 @@ export class RealWebUsbFastboot {
       throw new Error('WebUSB API is not supported in this browser. Please use Chrome, Edge, or Opera.');
     }
 
-    // Request device with any Fastboot class or known mobile vendor IDs
     const device = await navigator.usb.requestDevice({
       filters: [
         { classCode: 0xFF, subclassCode: 0x42, protocolCode: 0x03 }, // Android Fastboot standard
@@ -52,57 +144,119 @@ export class RealWebUsbFastboot {
   }
 
   /**
-   * Open device connection, claim interface and identify bulk endpoints
+   * Open device connection with robust Polling-Retry logic
+   * Handles OS-level handshake timeouts, endpoint stalls, and delayed driver initialization.
    */
-  async connect(device: USBDevice): Promise<string> {
+  async connectWithRetry(device: USBDevice, retryConfig?: FastbootRetryConfig): Promise<string> {
+    const maxRetries = retryConfig?.maxRetries ?? 5;
+    const delayMs = retryConfig?.delayMs ?? 600;
+    const timeoutMs = retryConfig?.timeoutMs ?? 4000;
+    const onRetry = retryConfig?.onRetry;
+
     this.device = device;
-    await this.device.open();
+    let lastError: Error | null = null;
 
-    if (this.device.configuration === null) {
-      await this.device.selectConfiguration(1);
-    }
+    for (let attempt = 1; attempt <= maxRetries; attempt++) {
+      try {
+        console.log(`[WebUSB-Fastboot] Connection attempt ${attempt}/${maxRetries} for ${device.productName || 'USB Target'}...`);
 
-    // Locate the Fastboot or Vendor interface
-    let matchedInterface: USBInterface | null = null;
-    let foundIn = 0;
-    let foundOut = 0;
+        // Step 1: Open USB Device (with timeout protection)
+        if (!this.device.opened) {
+          await RealWebUsbFastboot.withTimeout(
+            this.device.open(),
+            timeoutMs,
+            'OS USB device open handshake timed out'
+          );
+        }
 
-    for (const iface of this.device.configuration?.interfaces || []) {
-      for (const alt of iface.alternates) {
-        // Fastboot standard is 255/66/3 or vendor bulk in/out
-        const hasBulkIn = alt.endpoints.some(e => e.direction === 'in' && e.type === 'bulk');
-        const hasBulkOut = alt.endpoints.some(e => e.direction === 'out' && e.type === 'bulk');
+        // Step 2: Select USB Configuration
+        if (this.device.configuration === null) {
+          await RealWebUsbFastboot.withTimeout(
+            this.device.selectConfiguration(1),
+            timeoutMs,
+            'OS USB configuration selection timed out'
+          );
+        }
 
-        if (hasBulkIn && hasBulkOut) {
-          matchedInterface = iface;
-          const epIn = alt.endpoints.find(e => e.direction === 'in' && e.type === 'bulk');
-          const epOut = alt.endpoints.find(e => e.direction === 'out' && e.type === 'bulk');
-          if (epIn && epOut) {
-            foundIn = epIn.endpointNumber;
-            foundOut = epOut.endpointNumber;
-            break;
+        // Step 3: Discover Fastboot / Bulk Endpoints
+        let matchedInterface: USBInterface | null = null;
+        let foundIn = 0;
+        let foundOut = 0;
+
+        for (const iface of this.device.configuration?.interfaces || []) {
+          for (const alt of iface.alternates) {
+            const hasBulkIn = alt.endpoints.some(e => e.direction === 'in' && e.type === 'bulk');
+            const hasBulkOut = alt.endpoints.some(e => e.direction === 'out' && e.type === 'bulk');
+
+            if (hasBulkIn && hasBulkOut) {
+              matchedInterface = iface;
+              const epIn = alt.endpoints.find(e => e.direction === 'in' && e.type === 'bulk');
+              const epOut = alt.endpoints.find(e => e.direction === 'out' && e.type === 'bulk');
+              if (epIn && epOut) {
+                foundIn = epIn.endpointNumber;
+                foundOut = epOut.endpointNumber;
+                break;
+              }
+            }
           }
+          if (matchedInterface) break;
+        }
+
+        if (!matchedInterface) {
+          throw new Error('No bulk transfer endpoints discovered on target mobile hardware.');
+        }
+
+        this.interfaceNumber = matchedInterface.interfaceNumber;
+        this.endpointIn = foundIn;
+        this.endpointOut = foundOut;
+
+        // Step 4: Claim USB Interface (with timeout)
+        await RealWebUsbFastboot.withTimeout(
+          this.device.claimInterface(this.interfaceNumber),
+          timeoutMs,
+          'OS USB claimInterface handshake timed out'
+        );
+
+        this.isConnected = true;
+        console.log(`[+] [WebUSB-Fastboot] Fastboot Connection Established on attempt ${attempt}!`);
+        return `Claimed USB Interface #${this.interfaceNumber} (EP IN: ${this.endpointIn}, EP OUT: ${this.endpointOut}) [Attempts: ${attempt}]`;
+
+      } catch (err: any) {
+        lastError = err instanceof Error ? err : new Error(String(err));
+        console.warn(`[!] [WebUSB-Fastboot] Connection attempt ${attempt}/${maxRetries} failed: ${lastError.message}`);
+
+        if (onRetry) {
+          onRetry(attempt, maxRetries, lastError);
+        }
+
+        // Attempt soft recovery reset before next retry
+        try {
+          if (this.device && this.device.opened) {
+            await this.device.close().catch(() => {});
+          }
+        } catch (_) {}
+
+        if (attempt < maxRetries) {
+          const backoff = delayMs * Math.pow(1.2, attempt - 1);
+          console.log(`[WebUSB-Fastboot] Polling retry delay ${Math.round(backoff)}ms before attempt ${attempt + 1}...`);
+          await RealWebUsbFastboot.delay(backoff);
         }
       }
-      if (matchedInterface) break;
     }
 
-    if (!matchedInterface) {
-      throw new Error('No bulk transfer endpoints discovered on target mobile hardware.');
-    }
-
-    this.interfaceNumber = matchedInterface.interfaceNumber;
-    this.endpointIn = foundIn;
-    this.endpointOut = foundOut;
-
-    await this.device.claimInterface(this.interfaceNumber);
-    this.isConnected = true;
-
-    return `Claimed USB Interface #${this.interfaceNumber} (EP IN: ${this.endpointIn}, EP OUT: ${this.endpointOut})`;
+    this.isConnected = false;
+    throw new Error(`Fastboot USB connection failed after ${maxRetries} polling retries. Last error: ${lastError?.message || 'Handshake timeout'}`);
   }
 
   /**
-   * Execute real raw Fastboot command sequence
+   * Connect to device (backward compatible wrapper with default retries)
+   */
+  async connect(device: USBDevice): Promise<string> {
+    return this.connectWithRetry(device, { maxRetries: 4, delayMs: 500, timeoutMs: 3500 });
+  }
+
+  /**
+   * Execute real raw Fastboot command sequence with timeout protection
    */
   async sendCommand(command: string, onInfo?: (msg: string) => void): Promise<string> {
     if (!this.connected || !this.device) {
@@ -114,13 +268,22 @@ export class RealWebUsbFastboot {
     const data = encoder.encode(command);
 
     // Send ASCII command
-    await this.device.transferOut(this.endpointOut, data);
+    await RealWebUsbFastboot.withTimeout(
+      this.device.transferOut(this.endpointOut, data),
+      4000,
+      `Fastboot command Out Transfer (${command}) timed out`
+    );
 
     let finalResponse = '';
 
     // Fastboot protocol response loop
     while (true) {
-      const result = await this.device.transferIn(this.endpointIn, 512);
+      const result = await RealWebUsbFastboot.withTimeout(
+        this.device.transferIn(this.endpointIn, 512),
+        4000,
+        `Fastboot command In Response (${command}) timed out`
+      );
+
       if (!result.data || result.data.byteLength === 0) {
         break;
       }
@@ -141,7 +304,6 @@ export class RealWebUsbFastboot {
         finalResponse += `\n[DATA_CHUNK: ${payload}]`;
         break;
       } else {
-        // Raw stream fallback
         finalResponse += text;
         break;
       }
@@ -175,15 +337,22 @@ export class RealWebUsbFastboot {
 
     if (onLog) onLog(`[FLASH] Requesting fastboot download slot for ${totalBytes} bytes (0x${hexSize})...`);
 
-    // 1. Send download command
     const downloadCmd = `download:${hexSize}`;
     const enc = new TextEncoder();
     const dec = new TextDecoder();
 
-    await this.device.transferOut(this.endpointOut, enc.encode(downloadCmd));
+    await RealWebUsbFastboot.withTimeout(
+      this.device.transferOut(this.endpointOut, enc.encode(downloadCmd)),
+      5000,
+      'Fastboot download initialization transfer timed out'
+    );
 
-    // Read download readiness (Expecting DATA<hexSize>)
-    const prepResult = await this.device.transferIn(this.endpointIn, 512);
+    const prepResult = await RealWebUsbFastboot.withTimeout(
+      this.device.transferIn(this.endpointIn, 512),
+      5000,
+      'Fastboot download ACK response timed out'
+    );
+
     if (!prepResult.data || prepResult.data.byteLength === 0) {
       throw new Error('Device did not acknowledge download readiness.');
     }
@@ -195,7 +364,6 @@ export class RealWebUsbFastboot {
 
     if (onLog) onLog(`[FLASH] Device ready. Streaming image data over Bulk Out EP #${this.endpointOut}...`);
 
-    // 2. Stream chunk by chunk (64KB chunks)
     const CHUNK_SIZE = 64 * 1024;
     let offset = 0;
 
@@ -208,14 +376,17 @@ export class RealWebUsbFastboot {
       if (onProgress) onProgress(pct, offset, totalBytes);
     }
 
-    // Read OKAY response for download
-    const downAck = await this.device.transferIn(this.endpointIn, 512);
+    const downAck = await RealWebUsbFastboot.withTimeout(
+      this.device.transferIn(this.endpointIn, 512),
+      5000,
+      'Fastboot payload stream completion ACK timed out'
+    );
+
     if (downAck.data) {
       const ackText = dec.decode(downAck.data);
       if (onLog) onLog(`[FLASH] Staging status: ${ackText.trim()}`);
     }
 
-    // 3. Trigger write to NAND partition
     if (onLog) onLog(`[FLASH] Committing image to target partition '${partition}'...`);
     const flashCmd = `flash:${partition}`;
     const flashResult = await this.sendCommand(flashCmd, (info) => {
