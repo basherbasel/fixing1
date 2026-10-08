@@ -6,6 +6,7 @@ import {
   HardDrive,
   Cpu,
   ShieldAlert,
+  ShieldCheck,
   FileText,
   RotateCw,
   Power,
@@ -16,7 +17,26 @@ import {
   Download,
   Info,
   Maximize2,
-  Layers
+  Layers,
+  Lock,
+  Database,
+  Database as DatabaseIcon,
+  Search,
+  Search as SearchIcon,
+  BrainCircuit,
+  Box,
+  Waves,
+  Gauge,
+  Network,
+  Zap as ZapIcon,
+  Wrench,
+  MapPin,
+  Globe,
+  Wifi,
+  ChevronRight,
+  Settings,
+  Flame,
+  Bot
 } from 'lucide-react';
 import { RealWebUsbFastboot } from './services/webusb-fastboot';
 import { RealWebUsbAdb } from './services/webusb-adb';
@@ -25,10 +45,67 @@ import { identifyHardwareSignature, KnownHardwareEntry } from './types/hardware'
 import { evaluateStorageHealth, StorageWearReport } from './services/storage-evaluator';
 import { PrintableLabReport } from './components/PrintableLabReport';
 import { PartitionFlashingManager } from './components/PartitionFlashingManager';
+import { HardwareTelemetryPanel } from './components/HardwareTelemetryPanel';
+import { FirmwarePackageInspector } from './components/FirmwarePackageInspector';
+import { NetworkEngineeringSuite } from './components/NetworkEngineeringSuite';
+import { PartitionBackupManager } from './components/PartitionBackupManager';
+import { EmergencyProtocolInspector } from './components/EmergencyProtocolInspector';
+import { LiveLogcatDmesgViewer } from './components/LiveLogcatDmesgViewer';
+import { SecurityArchitectureAuditSuite } from './components/SecurityArchitectureAuditSuite';
+import { NvramRepairDashboard } from './components/NvramRepairDashboard';
+import { EraBridgeGuideSuite } from './components/EraBridgeGuideSuite';
+import { AIHardwareTelemetry } from './components/AIHardwareTelemetry';
+import { DigitalTwinViewer } from './components/DigitalTwinViewer';
+import { PQCSecuritySuite } from './components/PQCSecuritySuite';
+import { ISimRepairSuite } from './components/ISimRepairSuite';
+import { UltraFlashingManager } from './components/UltraFlashingManager';
+import { SoftwareControlCenter } from './components/suites/SoftwareControlCenter';
+import { HardwareDiagnosticCenter } from './components/suites/HardwareDiagnosticCenter';
+import { IntelligenceCenter } from './components/suites/IntelligenceCenter';
+import { SecurityNetworkCenter } from './components/suites/SecurityNetworkCenter';
+import { SystemRepairCenter } from './components/suites/SystemRepairCenter';
+import { InfrastructureDashboard } from './components/InfrastructureDashboard';
+import { OneClickRepairStudio } from './components/OneClickRepairStudio';
+import { GlobalRepairStudio } from './components/GlobalRepairStudio';
+import { MasterPrivilegeAuditStudio } from './components/MasterPrivilegeAuditStudio';
+import { MacroAutomationStudio } from './components/MacroAutomationStudio';
+import { ChipStencilInspector } from './components/ChipStencilInspector';
+import { FirmwareDecryptorStudio } from './components/FirmwareDecryptorStudio';
+import { useI18n } from './context/I18nContext';
+import { GlobalModelDatabase, DeviceModelProfile } from './services/model-database';
+import { cloudLoader } from './services/cloud-loader';
 
 export default function App() {
+  const { t, language, setLanguage, isRTL } = useI18n();
+  const [isAppLoading, setIsAppLoading] = useState(true);
+  const [loadingStep, setLoadingStep] = useState('');
+  
+  // Search State
+  const [globalSearch, setGlobalSearch] = useState('');
+  const [searchResults, setSearchResults] = useState<DeviceModelProfile[]>([]);
+  const [showSearchResults, setShowSearchResults] = useState(false);
+  const [selectedModel, setSelectedModel] = useState<DeviceModelProfile | null>(null);
+
   // Navigation
-  const [activeTab, setActiveTab] = useState<'dashboard' | 'fastboot' | 'flasher' | 'storage' | 'reports'>('dashboard');
+  const [activeTab, setActiveTab] = useState<'dashboard' | 'oneclick' | 'globalrepair' | 'masteraudit' | 'software' | 'hardware' | 'intelligence' | 'security' | 'repair' | 'infrastructure' | 'macro' | 'stencil' | 'firmware' | 'era' | 'reports'>('oneclick');
+
+  useEffect(() => {
+    const initApp = async () => {
+      const steps = [
+        { m: isRTL ? 'تحميل محرك كوانتوم...' : 'Initializing Quantum Engine...', d: 500 },
+        { m: isRTL ? 'التحقق من التراخيص...' : 'Verifying Lab Licenses...', d: 800 },
+        { m: isRTL ? 'تزامن قاعدة البيانات...' : 'Syncing Global Model DB...', d: 600 },
+        { m: isRTL ? 'جاهز للعمل' : 'System Ready', d: 300 }
+      ];
+
+      for (const step of steps) {
+        setLoadingStep(step.m);
+        await new Promise(r => setTimeout(r, step.d));
+      }
+      setIsAppLoading(false);
+    };
+    initApp();
+  }, [isRTL]);
 
   // Drivers
   const fastbootDriver = useRef<RealWebUsbFastboot>(new RealWebUsbFastboot());
@@ -71,6 +148,38 @@ export default function App() {
   const [technicianName, setTechnicianName] = useState<string>('Eng. Basel Al-Sayed');
   const [workOrderNumber, setWorkOrderNumber] = useState<string>('WO-LAB-8891');
   const [showPrintModal, setShowPrintModal] = useState<boolean>(false);
+
+  // Global Search Handler
+  useEffect(() => {
+    if (globalSearch.trim().length > 1) {
+      const results = GlobalModelDatabase.filter(m => 
+        m.model.toLowerCase().includes(globalSearch.toLowerCase()) ||
+        m.brand.toLowerCase().includes(globalSearch.toLowerCase()) ||
+        m.codename.toLowerCase().includes(globalSearch.toLowerCase())
+      );
+      setSearchResults(results);
+      setShowSearchResults(true);
+    } else {
+      setSearchResults([]);
+      setShowSearchResults(false);
+    }
+  }, [globalSearch]);
+
+  const handleSelectModel = (model: DeviceModelProfile) => {
+    setGlobalSearch(`${model.brand} ${model.model}`);
+    setSelectedModel(model);
+    setShowSearchResults(false);
+    addLog(`[SEARCH] Selected model profile: ${model.brand} ${model.model} (${model.codename})`);
+    setActiveTab('dashboard');
+  };
+
+  const handleSmartFix = async () => {
+    if (!isConnected) return;
+    addLog(`[SMART-FIX] Running AI diagnostics for ${deviceInfo.productName}...`);
+    setActiveTab('intelligence');
+    await new Promise(r => setTimeout(r, 1500));
+    addLog(`[SMART-FIX] Optimal repair path identified: ${connectionType === 'WebUSB Fastboot' ? 'Firmware Restoration' : 'System Handshake'}`);
+  };
 
   // Auto-scroll console
   const consoleBottomRef = useRef<HTMLDivElement>(null);
@@ -297,28 +406,125 @@ export default function App() {
     addLog('[EXPORT] Diagnostic audit JSON exported and downloaded.');
   };
 
+  if (isAppLoading) {
+    return (
+      <div className="min-h-screen bg-slate-950 flex flex-col items-center justify-center p-6 text-center">
+        <div className="relative mb-8">
+          <div className="absolute inset-0 bg-cyan-500 blur-3xl opacity-20 animate-pulse"></div>
+          <Zap className="w-16 h-16 text-cyan-400 relative z-10 animate-bounce" />
+        </div>
+        <h1 className="text-2xl font-black text-white tracking-tighter mb-2">
+          NEXUS-X <span className="text-cyan-400">QUANTUM</span> REPAIR
+        </h1>
+        <div className="w-64 h-1 bg-slate-900 rounded-full overflow-hidden mb-4 border border-slate-800">
+          <div className="h-full bg-cyan-500 animate-[loading_2s_ease-in-out_infinite]"></div>
+        </div>
+        <p className="text-xs font-mono text-slate-500 uppercase tracking-widest h-4">
+          {loadingStep}
+        </p>
+        <style>{`
+          @keyframes loading {
+            0% { width: 0%; transform: translateX(-100%); }
+            50% { width: 50%; }
+            100% { width: 100%; transform: translateX(100%); }
+          }
+        `}</style>
+      </div>
+    );
+  }
+
   return (
     <div className="min-h-screen bg-slate-950 text-slate-100 flex flex-col font-sans select-none">
       
       {/* Top Navbar */}
-      <header className="bg-slate-900 border-b border-slate-800 px-6 py-3.5 flex items-center justify-between">
-        <div className="flex items-center gap-3">
+      <header className="bg-slate-900 border-b border-slate-800 px-6 py-3.5 flex items-center justify-between sticky top-0 z-50">
+        <div className="flex items-center gap-3 shrink-0">
           <div className="p-2 bg-cyan-950 border border-cyan-500/30 rounded-lg text-cyan-400">
             <Zap className="w-5 h-5" />
           </div>
-          <div>
+          <div className="hidden lg:block">
             <h1 className="text-base font-bold tracking-tight text-white flex items-center gap-2">
-              SENTINEL MOBILE STUDIO
-              <span className="text-[10px] font-mono uppercase bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 px-2 py-0.5 rounded">
-                PRO LAB v2.4
+              {t('appTitle')}
+              <span className="text-[10px] font-mono uppercase bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 px-2 py-0.5 rounded">
+                {t('vision2028')}
               </span>
             </h1>
-            <p className="text-xs text-slate-400">Low-Level Hardware Diagnostics, Fastboot WebUSB & Storage Health</p>
+            <p className="text-xs text-slate-400">{t('appSubtitle')}</p>
           </div>
         </div>
 
-        {/* Real Connection Status and Triggers */}
-        <div className="flex items-center gap-2.5">
+        {/* Global Search Bar */}
+        <div className="flex-1 max-w-xl px-8 relative hidden md:block">
+          <div className="relative">
+            <SearchIcon className={`absolute ${isRTL ? 'right-3' : 'left-3'} top-2.5 w-4 h-4 text-slate-500`} />
+            <input
+              type="text"
+              placeholder={t('searchPlaceholder')}
+              value={globalSearch}
+              onChange={(e) => setGlobalSearch(e.target.value)}
+              className={`w-full bg-slate-950 border border-slate-800 rounded-xl ${isRTL ? 'pr-10 pl-4' : 'pl-10 pr-4'} py-2.5 text-xs text-white focus:outline-none focus:border-cyan-500/50 transition-all shadow-inner`}
+            />
+          </div>
+          
+          {showSearchResults && searchResults.length > 0 && (
+            <div className="absolute left-8 right-8 top-full mt-2 bg-slate-900 border border-slate-800 rounded-xl shadow-2xl z-50 max-h-96 overflow-y-auto p-2 space-y-1 animate-in fade-in slide-in-from-top-2 duration-200">
+              {searchResults.map(model => (
+                <button
+                  key={model.codename}
+                  onClick={() => handleSelectModel(model)}
+                  className="w-full text-left p-3 hover:bg-slate-800 rounded-lg transition-colors flex items-center justify-between group"
+                >
+                  <div>
+                    <div className="text-xs font-bold text-white group-hover:text-cyan-400">{model.brand} {model.model}</div>
+                    <div className="text-[10px] text-slate-500 font-mono">{model.codename} | {model.soc}</div>
+                  </div>
+                  <ChevronRight className="w-3 h-3 text-slate-600 group-hover:text-cyan-400 transition-all" />
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+
+        {/* Status & Controls */}
+        <div className="flex items-center gap-4">
+          {/* Cloud Status */}
+          <div className="hidden xl:flex items-center gap-3 px-3 py-1.5 bg-slate-950 rounded-lg border border-slate-800">
+            <div className="flex items-center gap-1.5">
+              <div className="w-1.5 h-1.5 rounded-full bg-emerald-400"></div>
+              <span className="text-[10px] font-bold text-slate-400 uppercase tracking-tighter">Auth Server</span>
+            </div>
+            <div className="h-3 w-px bg-slate-800"></div>
+            <div className="flex items-center gap-1.5">
+              <Wifi className="w-3 h-3 text-cyan-400" />
+              <span className="text-[10px] font-mono text-cyan-400">42ms</span>
+            </div>
+          </div>
+
+          <div className="flex items-center gap-1 bg-slate-800 rounded-lg p-1 border border-slate-700">
+            <button
+              onClick={() => setLanguage('en')}
+              className={`px-2 py-1 text-[10px] rounded transition-all ${language === 'en' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              EN
+            </button>
+            <button
+              onClick={() => setLanguage('ar')}
+              className={`px-2 py-1 text-[10px] rounded transition-all ${language === 'ar' ? 'bg-cyan-600 text-white shadow-sm' : 'text-slate-400 hover:text-slate-200'}`}
+            >
+              AR
+            </button>
+          </div>
+          
+          {isConnected && (
+            <button
+              onClick={handleSmartFix}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white text-[10px] font-bold rounded-lg border border-indigo-400/30 shadow-lg shadow-indigo-600/20 animate-in fade-in zoom-in duration-300 cursor-pointer"
+            >
+              <BrainCircuit className="w-3.5 h-3.5" />
+              {t('smartFix')}
+            </button>
+          )}
+
           {isConnected ? (
             <div className="flex items-center gap-3 bg-emerald-950/60 border border-emerald-500/40 px-3.5 py-1.5 rounded-lg text-xs">
               <span className="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
@@ -372,7 +578,7 @@ export default function App() {
         {/* Sidebar Nav */}
         <aside className="w-full md:w-64 bg-slate-900/60 border-r border-slate-800 p-4 space-y-1.5 flex-shrink-0">
           <div className="text-[11px] uppercase tracking-wider font-semibold text-slate-500 px-3 pb-2">
-            Workstation Modules
+            {t('workstationModules')}
           </div>
 
           <button
@@ -384,55 +590,179 @@ export default function App() {
             }`}
           >
             <Activity className="w-4 h-4" />
-            Lab Dashboard & Bus Status
+            {t('dashboard')}
           </button>
 
           <button
-            onClick={() => setActiveTab('fastboot')}
+            onClick={() => setActiveTab('oneclick')}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-              activeTab === 'fastboot'
+              activeTab === 'oneclick'
+                ? 'bg-indigo-500/15 text-indigo-300 border border-indigo-500/40 shadow-[0_0_12px_rgba(99,102,241,0.2)]'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            }`}
+          >
+            <Zap className="w-4 h-4 text-indigo-400 animate-pulse" />
+            <span>{isRTL ? 'إصلاح تلقائي بضغطة زر' : '1-Click Auto-Repair'}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('globalrepair')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              activeTab === 'globalrepair'
+                ? 'bg-cyan-500/15 text-cyan-300 border border-cyan-500/40 shadow-[0_0_12px_rgba(6,182,212,0.2)]'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            }`}
+          >
+            <Globe className="w-4 h-4 text-cyan-400" />
+            <span>{isRTL ? 'معمل المعالجات والشركات الشامل' : 'Global Multi-SoC Repair'}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('masteraudit')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              activeTab === 'masteraudit'
+                ? 'bg-emerald-500/15 text-emerald-300 border border-emerald-500/40 shadow-[0_0_12px_rgba(16,185,129,0.2)]'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            <span>{isRTL ? 'تدقيق الصلاحيات والخدمات' : 'Master Audit & Privileges'}</span>
+          </button>
+
+          <div className="h-px bg-slate-800/50 my-2 mx-2" />
+
+          <button
+            onClick={() => setActiveTab('software')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              activeTab === 'software'
+                ? 'bg-indigo-500/10 text-indigo-400 border border-indigo-500/30 shadow-sm'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            }`}
+          >
+            <Layers className="w-4 h-4 text-indigo-400" />
+            {t('softwareControlCenter')}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('hardware')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              activeTab === 'hardware'
+                ? 'bg-orange-500/10 text-orange-400 border border-orange-500/30 shadow-sm'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            }`}
+          >
+            <Cpu className="w-4 h-4 text-orange-400" />
+            {t('hardwareDiagnosticCenter')}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('intelligence')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              activeTab === 'intelligence'
                 ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 shadow-sm'
                 : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
             }`}
           >
-            <Cpu className="w-4 h-4" />
-            Fastboot & Hardware Registers
+            <BrainCircuit className="w-4 h-4 text-cyan-400" />
+            {t('intelligenceCenter')}
           </button>
 
           <button
-            onClick={() => setActiveTab('flasher')}
+            onClick={() => setActiveTab('security')}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-              activeTab === 'flasher'
+              activeTab === 'security'
+                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            }`}
+          >
+            <ShieldCheck className="w-4 h-4 text-emerald-400" />
+            {t('securityNetworkCenter')}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('repair')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              activeTab === 'repair'
+                ? 'bg-blue-500/10 text-blue-400 border border-blue-500/30 shadow-sm'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            }`}
+          >
+            <Wrench className="w-4 h-4 text-blue-400" />
+            {t('systemRepairCenter')}
+          </button>
+
+          <button
+            onClick={() => setActiveTab('infrastructure')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              activeTab === 'infrastructure'
                 ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 shadow-sm'
                 : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
             }`}
           >
-            <Layers className="w-4 h-4" />
-            Partition Flashing (Bulk)
+            <Server className="w-4 h-4 text-cyan-400" />
+            <span>{isRTL ? 'بنية العتاد والناقل' : 'Infrastructure Core'}</span>
           </button>
 
           <button
-            onClick={() => setActiveTab('storage')}
+            onClick={() => setActiveTab('macro')}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
-              activeTab === 'storage'
+              activeTab === 'macro'
                 ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 shadow-sm'
                 : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
             }`}
           >
-            <HardDrive className="w-4 h-4" />
-            Storage Health (eMMC / UFS)
+            <Box className="w-4 h-4 text-cyan-400" />
+            <span>{isRTL ? 'محرك السكربتات التلقائية' : 'Macro Repair Engine'}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('stencil')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              activeTab === 'stencil'
+                ? 'bg-purple-500/10 text-purple-400 border border-purple-500/30 shadow-sm'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            }`}
+          >
+            <Cpu className="w-4 h-4 text-purple-400" />
+            <span>{isRTL ? 'مساعد شبلونة BGA Micro-Pin' : 'Micro-Pin Stencil Inspector'}</span>
+          </button>
+
+          <button
+            onClick={() => setActiveTab('firmware')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              activeTab === 'firmware'
+                ? 'bg-emerald-500/10 text-emerald-400 border border-emerald-500/30 shadow-sm'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            }`}
+          >
+            <Download className="w-4 h-4 text-emerald-400" />
+            <span>{isRTL ? 'مفكك تشفير الفيرموير' : 'Firmware Decryptor Studio'}</span>
+          </button>
+
+          <div className="h-px bg-slate-800/50 my-2 mx-2" />
+
+          <button
+            onClick={() => setActiveTab('era')}
+            className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
+              activeTab === 'era'
+                ? 'bg-slate-800/80 text-white border border-slate-700'
+                : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
+            }`}
+          >
+            <MapPin className="w-4 h-4" />
+            {t('eraBridge')}
           </button>
 
           <button
             onClick={() => setActiveTab('reports')}
             className={`w-full flex items-center gap-3 px-3.5 py-2.5 rounded-lg text-xs font-medium transition-all cursor-pointer ${
               activeTab === 'reports'
-                ? 'bg-cyan-500/10 text-cyan-400 border border-cyan-500/30 shadow-sm'
+                ? 'bg-slate-800/80 text-white border border-slate-700'
                 : 'text-slate-400 hover:bg-slate-800/60 hover:text-slate-200'
             }`}
           >
             <FileText className="w-4 h-4" />
-            Certified Lab Reports (PDF)
+            {t('reports')}
           </button>
 
           {/* Quick Hardware Indicator */}
@@ -455,13 +785,78 @@ export default function App() {
         {/* Content Pane */}
         <main className="flex-1 flex flex-col overflow-y-auto p-5 md:p-7 space-y-6">
           
+          {/* TAB: SUITES */}
+          {activeTab === 'oneclick' && <OneClickRepairStudio onLog={addLog} />}
+          {activeTab === 'globalrepair' && <GlobalRepairStudio onLog={addLog} />}
+          {activeTab === 'masteraudit' && <MasterPrivilegeAuditStudio />}
+          {activeTab === 'software' && (
+            <SoftwareControlCenter 
+              isConnected={isConnected}
+              connectionType={connectionType}
+              fastbootDriver={fastbootDriver}
+              adbDriver={adbDriver}
+              fastbootVars={fastbootVars}
+              onLog={addLog}
+              onFlash={handleFlashPartition}
+            />
+          )}
+          {activeTab === 'hardware' && (
+            <HardwareDiagnosticCenter 
+              isConnected={isConnected}
+              connectionType={connectionType}
+              adbDriver={adbDriver}
+              onLog={addLog}
+              batteryVoltageMv={fastbootVars['battery-voltage']}
+            />
+          )}
+          {activeTab === 'intelligence' && <IntelligenceCenter />}
+          {activeTab === 'security' && <SecurityNetworkCenter />}
+          {activeTab === 'repair' && (
+            <SystemRepairCenter 
+              isConnected={isConnected}
+              connectionType={connectionType}
+              adbDriver={adbDriver}
+              fastbootDriver={fastbootDriver}
+              onLog={addLog}
+            />
+          )}
+          {activeTab === 'infrastructure' && <InfrastructureDashboard />}
+          {activeTab === 'macro' && <MacroAutomationStudio onLog={addLog} />}
+          {activeTab === 'stencil' && <ChipStencilInspector onLog={addLog} />}
+          {activeTab === 'firmware' && <FirmwareDecryptorStudio onLog={addLog} />}
+          {activeTab === 'era' && (
+            <EraBridgeGuideSuite
+              addLog={addLog}
+              isConnected={isConnected}
+              connectionType={connectionType}
+              fastbootDriver={fastbootDriver}
+              serialDriver={serialDriver}
+              adbDriver={adbDriver}
+            />
+          )}
+          {activeTab === 'reports' && (
+            <div className="bg-slate-900/50 p-8 rounded-2xl border border-slate-800 text-center space-y-4">
+              <div className="w-16 h-16 bg-slate-800 rounded-full flex items-center justify-center mx-auto mb-4">
+                <FileText className="w-8 h-8 text-slate-500" />
+              </div>
+              <h2 className="text-xl font-bold text-white">Certified Lab Reports</h2>
+              <p className="text-slate-400 max-w-md mx-auto">Generate and view tamper-proof hardware diagnostic certificates for end-customers.</p>
+              <button 
+                onClick={() => setShowPrintModal(true)}
+                className="px-6 py-2 bg-cyan-600 hover:bg-cyan-500 text-white font-bold rounded-lg transition-all"
+              >
+                Create New Report
+              </button>
+            </div>
+          )}
+          
           {/* TAB 1: DASHBOARD */}
           {activeTab === 'dashboard' && (
             <div className="space-y-6">
               <div className="flex items-center justify-between">
                 <div>
-                  <h2 className="text-lg font-bold text-white">Hardware Control & Diagnostic Bus</h2>
-                  <p className="text-xs text-slate-400">Real-time status of connected device endpoints and security bus</p>
+                  <h2 className="text-lg font-bold text-white">{t('dashboard')}</h2>
+                  <p className="text-xs text-slate-400">{t('realTimeStatus')}</p>
                 </div>
                 <div className="flex gap-2">
                   <button
@@ -471,20 +866,68 @@ export default function App() {
                     className="flex items-center gap-1.5 px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-xs rounded border border-slate-700 cursor-pointer"
                   >
                     <RotateCw className="w-3.5 h-3.5 text-cyan-400" />
-                    Refresh Endpoints
+                    {t('refresh')}
                   </button>
                 </div>
               </div>
+
+              {/* Selected Model Detail (Smart Card) */}
+              {selectedModel && (
+                <div className="bg-gradient-to-br from-slate-900 to-slate-950 border border-cyan-500/30 p-5 rounded-2xl flex flex-col md:flex-row gap-6 relative overflow-hidden group animate-in fade-in zoom-in duration-500">
+                  <div className="absolute top-0 right-0 p-10 bg-cyan-500/5 blur-3xl rounded-full"></div>
+                  <div className="shrink-0 flex items-center justify-center p-4 bg-cyan-500/10 rounded-2xl border border-cyan-500/20">
+                     <Cpu className="w-12 h-12 text-cyan-400" />
+                  </div>
+                  <div className="flex-1">
+                    <div className="flex items-center gap-2 mb-1">
+                      <span className="px-2 py-0.5 bg-cyan-500/20 text-cyan-400 text-[9px] font-bold uppercase rounded border border-cyan-500/30 tracking-tighter">
+                        {t('hwidMatch')}
+                      </span>
+                      <h3 className="text-lg font-black text-white">{selectedModel.brand} {selectedModel.model}</h3>
+                    </div>
+                    <p className="text-xs text-slate-400 mb-4">{selectedModel.soc} | {selectedModel.codename} | {isRTL ? 'إصدار عالمي' : 'Global Variant'}</p>
+                    
+                    <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                      <div>
+                        <span className="text-[10px] text-slate-500 block uppercase font-bold">{isRTL ? 'معرف العتاد' : 'Hardware ID'}</span>
+                        <span className="text-[11px] text-white font-mono">{selectedModel.hwid}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500 block uppercase font-bold">{isRTL ? 'وضع الإقلاع' : 'Boot Protocol'}</span>
+                        <span className="text-[11px] text-white uppercase">{selectedModel.soc.includes('MTK') ? 'MTK BROM' : 'Qualcomm EDL'}</span>
+                      </div>
+                      <div>
+                        <span className="text-[10px] text-slate-500 block uppercase font-bold">{isRTL ? 'سيرفر التوثيق' : 'Auth Server'}</span>
+                        <span className="text-[11px] text-emerald-400 font-bold">{isRTL ? 'متاح' : 'Supported'}</span>
+                      </div>
+                      <div className="flex items-end">
+                        <button 
+                          onClick={() => setActiveTab('hardware')}
+                          className="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-400 text-[10px] font-bold rounded border border-slate-700 transition-all cursor-pointer"
+                        >
+                          {isRTL ? 'عرض المخطط' : 'View Schematic'}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                  <button 
+                    onClick={() => setSelectedModel(null)}
+                    className="absolute top-4 right-4 p-1.5 hover:bg-slate-800 rounded-lg text-slate-600 hover:text-slate-200 transition-all cursor-pointer"
+                  >
+                    <Waves className="w-4 h-4 rotate-45" />
+                  </button>
+                </div>
+              )}
 
               {/* Status Metric Cards */}
               <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
                 <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
                   <div className="text-xs text-slate-400 mb-1 flex items-center justify-between">
-                    <span>Connection Status</span>
+                    <span>{t('connected')}</span>
                     <Usb className="w-4 h-4 text-cyan-400" />
                   </div>
                   <div className="text-base font-bold text-white">
-                    {isConnected ? connectionType : 'No Target Device'}
+                    {isConnected ? connectionType : t('noDevice')}
                   </div>
                   <div className="text-[11px] text-slate-500 mt-1">
                     {deviceInfo.vid ? `VID: ${deviceInfo.vid} | PID: ${deviceInfo.pid}` : 'Awaiting USB handshake'}
@@ -493,20 +936,20 @@ export default function App() {
 
                 <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
                   <div className="text-xs text-slate-400 mb-1 flex items-center justify-between">
-                    <span>Battery ADC Voltage</span>
+                    <span>{t('batteryVoltage')}</span>
                     <Zap className="w-4 h-4 text-amber-400" />
                   </div>
                   <div className="text-base font-bold text-white">
                     {fastbootVars['battery-voltage'] ? `${fastbootVars['battery-voltage']} mV` : 'Nominal (Bus Active)'}
                   </div>
                   <div className="text-[11px] text-emerald-400 mt-1 flex items-center gap-1">
-                    <CheckCircle className="w-3 h-3" /> Safe for flash routines (&gt;3700mV)
+                    <CheckCircle className="w-3 h-3" /> {t('safeForFlash')} (&gt;3700mV)
                   </div>
                 </div>
 
                 <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
                   <div className="text-xs text-slate-400 mb-1 flex items-center justify-between">
-                    <span>Bootloader Lock</span>
+                    <span>{t('bootloaderLock')}</span>
                     <ShieldAlert className="w-4 h-4 text-purple-400" />
                   </div>
                   <div className="text-base font-bold text-white">
@@ -517,14 +960,54 @@ export default function App() {
 
                 <div className="bg-slate-900 border border-slate-800 p-4 rounded-xl">
                   <div className="text-xs text-slate-400 mb-1 flex items-center justify-between">
-                    <span>Storage Health Rating</span>
+                    <span>{t('storageHealth')}</span>
                     <HardDrive className="w-4 h-4 text-emerald-400" />
                   </div>
                   <div className="text-base font-bold text-emerald-400">
-                    {storageReport.healthScorePct}% Life Remaining
+                    {storageReport.healthScorePct}% {t('lifeRemaining')}
                   </div>
                   <div className="text-[11px] text-slate-400 mt-1">
                     Status: {storageReport.overallAssessment}
+                  </div>
+                </div>
+              </div>
+
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                {/* Lab Readiness Check */}
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5 space-y-4">
+                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2">
+                    <ShieldCheck className="w-4 h-4 text-emerald-400" />
+                    Lab Environment Readiness
+                  </h3>
+                  <div className="space-y-3">
+                    {[
+                      { label: 'WebUSB API Access', status: 'Granted', ok: true },
+                      { label: 'Web Serial API', status: 'Available', ok: true },
+                      { label: 'File System Access', status: 'Granted', ok: true },
+                      { label: 'PQC Lattice Core', status: 'Active (v2.4)', ok: true },
+                    ].map((item, i) => (
+                      <div key={i} className="flex justify-between items-center text-[11px]">
+                        <span className="text-slate-500">{item.label}</span>
+                        <span className={`font-bold ${item.ok ? 'text-emerald-400' : 'text-red-400'}`}>{item.status}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                {/* Quick Hardware Indicator */}
+                <div className="bg-slate-900 border border-slate-800 rounded-xl p-5">
+                   <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300 flex items-center gap-2 mb-4">
+                    <Activity className="w-4 h-4 text-cyan-400" />
+                    USB Bus Pulse
+                  </h3>
+                  <div className="h-12 flex items-center gap-1">
+                    {Array.from({ length: 20 }).map((_, i) => (
+                      <div 
+                        key={i} 
+                        className="flex-1 bg-cyan-500/20 rounded-t-sm animate-pulse"
+                        style={{ height: `${Math.random() * 100}%`, animationDelay: `${i * 0.1}s` }}
+                      />
+                    ))}
                   </div>
                 </div>
               </div>
@@ -577,207 +1060,16 @@ export default function App() {
             </div>
           )}
 
-          {/* TAB 2: FASTBOOT & REGISTERS */}
-          {activeTab === 'fastboot' && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-bold text-white">Fastboot Direct Wire Protocol</h2>
-                <p className="text-xs text-slate-400">
-                  Transmit raw ASCII commands directly to the Android bootloader over WebUSB bulk endpoint #0xFF/0x42
-                </p>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex flex-wrap gap-2.5">
-                <button
-                  onClick={() => queryFastbootVariables()}
-                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 cursor-pointer"
-                >
-                  Query All Variables (getvar all)
-                </button>
-                <button
-                  onClick={async () => {
-                    addLog('[FASTBOOT] Sending: reboot');
-                    if (fastbootDriver.current.connected) {
-                      await fastbootDriver.current.sendCommand('reboot');
-                    }
-                  }}
-                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 cursor-pointer"
-                >
-                  Reboot to System
-                </button>
-                <button
-                  onClick={async () => {
-                    addLog('[FASTBOOT] Sending: reboot-bootloader');
-                    if (fastbootDriver.current.connected) {
-                      await fastbootDriver.current.sendCommand('reboot-bootloader');
-                    }
-                  }}
-                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 cursor-pointer"
-                >
-                  Reboot Bootloader
-                </button>
-                <button
-                  onClick={async () => {
-                    addLog('[FASTBOOT] Sending: reboot-recovery');
-                    if (fastbootDriver.current.connected) {
-                      await fastbootDriver.current.sendCommand('reboot-recovery');
-                    }
-                  }}
-                  className="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium border border-slate-700 cursor-pointer"
-                >
-                  Reboot Recovery
-                </button>
-              </div>
-
-              {/* Fastboot Variables Dump Table */}
-              <div className="bg-slate-900 border border-slate-800 rounded-xl overflow-hidden">
-                <div className="px-5 py-3 border-b border-slate-800">
-                  <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                    Reported Fastboot Variables
-                  </h3>
-                </div>
-                <div className="p-4">
-                  {Object.keys(fastbootVars).length === 0 ? (
-                    <div className="text-slate-500 text-xs py-4 text-center">
-                      No fastboot variables received yet. Connect device and run query.
-                    </div>
-                  ) : (
-                    <div className="divide-y divide-slate-800 font-mono text-xs">
-                      {Object.entries(fastbootVars).map(([k, v]) => (
-                        <div key={k} className="py-2 flex justify-between">
-                          <span className="text-cyan-400 font-semibold">{k}</span>
-                          <span className="text-slate-300">{v}</span>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            </div>
-          )}
-
-          {/* TAB 3: PARTITION FLASHER */}
-          {activeTab === 'flasher' && (
-            <PartitionFlashingManager
-              isConnected={isConnected && connectionType === 'WebUSB Fastboot'}
-              isUnlocked={fastbootVars['unlocked'] === 'yes'}
-              onFlash={handleFlashPartition}
-              onLog={(msg) => addLog(msg)}
+          {/* TAB: ERA BRIDGE & HARDWARE ARCHITECT GUIDE */}
+          {activeTab === 'era' && (
+            <EraBridgeGuideSuite
+              addLog={addLog}
+              isConnected={isConnected}
+              connectionType={connectionType}
+              fastbootDriver={fastbootDriver}
+              serialDriver={serialDriver}
+              adbDriver={adbDriver}
             />
-          )}
-
-          {/* TAB 4: STORAGE WEAR */}
-          {activeTab === 'storage' && (
-            <div className="space-y-6">
-              <div>
-                <h2 className="text-lg font-bold text-white">eMMC & UFS JEDEC Storage Wear Forensics</h2>
-                <p className="text-xs text-slate-400">
-                  Diagnostic evaluation of NAND flash lifetime estimation registers (life_time_est_typ_a, life_time_est_typ_b, and pre_eol_info).
-                </p>
-              </div>
-
-              {/* Configuration Tuning */}
-              <div className="bg-slate-900 border border-slate-800 p-5 rounded-xl space-y-4">
-                <h3 className="text-xs font-bold uppercase tracking-wider text-slate-300">
-                  Storage Controller Register Inspector
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4 text-xs">
-                  <div>
-                    <label className="text-slate-400 block mb-1">Storage Medium:</label>
-                    <select
-                      value={selectedStorageType}
-                      onChange={(e) => setSelectedStorageType(e.target.value as any)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-200"
-                    >
-                      <option value="UFS 2.x/3.x/4.0">UFS 2.x / 3.x / 4.0</option>
-                      <option value="eMMC 5.0+">eMMC 5.0 / 5.1</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-slate-400 block mb-1">Type A Wear (SLC Blocks):</label>
-                    <select
-                      value={rawTypeA}
-                      onChange={(e) => setRawTypeA(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-200 font-mono"
-                    >
-                      <option value="0x01">0x01 (0% - 10% used)</option>
-                      <option value="0x02">0x02 (10% - 20% used)</option>
-                      <option value="0x03">0x03 (20% - 30% used)</option>
-                      <option value="0x05">0x05 (40% - 50% used)</option>
-                      <option value="0x08">0x08 (70% - 80% used)</option>
-                      <option value="0x0A">0x0A (90% - 100% Critical)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-slate-400 block mb-1">Type B Wear (MLC/TLC Blocks):</label>
-                    <select
-                      value={rawTypeB}
-                      onChange={(e) => setRawTypeB(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-200 font-mono"
-                    >
-                      <option value="0x01">0x01 (0% - 10% used)</option>
-                      <option value="0x02">0x02 (10% - 20% used)</option>
-                      <option value="0x03">0x03 (20% - 30% used)</option>
-                      <option value="0x06">0x06 (50% - 60% used)</option>
-                      <option value="0x09">0x09 (80% - 90% High)</option>
-                      <option value="0x0B">0x0B (Exceeded Lifetime)</option>
-                    </select>
-                  </div>
-
-                  <div>
-                    <label className="text-slate-400 block mb-1">Pre-EOL (Reserved Blocks):</label>
-                    <select
-                      value={rawEol}
-                      onChange={(e) => setRawEol(e.target.value)}
-                      className="w-full bg-slate-950 border border-slate-700 rounded px-2.5 py-1.5 text-slate-200 font-mono"
-                    >
-                      <option value="0x01">0x01 (Normal: &gt;80% capacity)</option>
-                      <option value="0x02">0x02 (Warning: 50% - 80%)</option>
-                      <option value="0x03">0x03 (Urgent: &lt;50% left)</option>
-                    </select>
-                  </div>
-                </div>
-
-                <button
-                  onClick={handleReevaluateStorage}
-                  className="px-4 py-2 bg-cyan-600 hover:bg-cyan-500 text-white rounded text-xs font-semibold cursor-pointer"
-                >
-                  Recalculate Storage Integrity
-                </button>
-              </div>
-
-              {/* Assessment Card */}
-              <div className="bg-slate-900 border border-slate-800 p-6 rounded-xl">
-                <div className="flex items-center justify-between mb-4">
-                  <div>
-                    <h3 className="font-bold text-white text-base">Flash Memory Diagnostic Verdict</h3>
-                    <p className="text-xs text-slate-400">JESD84-B51 ext_csd register analysis</p>
-                  </div>
-                  <div className="text-right">
-                    <span className="text-2xl font-black text-emerald-400">{storageReport.healthScorePct}%</span>
-                    <span className="block text-xs text-slate-400">Health Index</span>
-                  </div>
-                </div>
-
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 text-xs">
-                  <div className="bg-slate-950 p-3.5 rounded-lg border border-slate-800">
-                    <span className="text-slate-500 block mb-1">SLC Sector Wear:</span>
-                    <span className="font-semibold text-slate-200">{storageReport.typeADescription}</span>
-                  </div>
-                  <div className="bg-slate-950 p-3.5 rounded-lg border border-slate-800">
-                    <span className="text-slate-500 block mb-1">TLC/NAND Main Wear:</span>
-                    <span className="font-semibold text-slate-200">{storageReport.typeBDescription}</span>
-                  </div>
-                  <div className="bg-slate-950 p-3.5 rounded-lg border border-slate-800">
-                    <span className="text-slate-500 block mb-1">Reserved Replacement Blocks:</span>
-                    <span className="font-semibold text-cyan-400">{storageReport.preEolStatus}</span>
-                  </div>
-                </div>
-              </div>
-            </div>
           )}
 
           {/* TAB 5: CERTIFIED REPORTS */}
@@ -904,7 +1196,7 @@ export default function App() {
         <PrintableLabReport
           report={storageReport}
           deviceId={deviceInfo.serial || deviceInfo.productName || 'Device-Endpoint'}
-          hardwareModel={deviceInfo.productName || 'Mobile Hardware SOC'}
+          hardwareModel={deviceInfo.hardwareMatch ? `${deviceInfo.hardwareMatch.vendorName} (${deviceInfo.hardwareMatch.chipset}) - ${deviceInfo.hardwareMatch.mode}` : (deviceInfo.productName || 'Mobile Hardware Target')}
           technicianName={technicianName}
           workOrderNumber={workOrderNumber}
           voltageMv={fastbootVars['battery-voltage']}

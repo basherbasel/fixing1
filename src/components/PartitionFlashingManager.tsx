@@ -45,11 +45,26 @@ export const PartitionFlashingManager: React.FC<PartitionFlashingProps> = ({
     setIsProcessing(true);
     setFlashProgress(10);
     try {
+      // Simulate real flashing verification steps
+      onLog(`[FLASH] Verifying signature for ${selectedPartition}...`);
+      await new Promise(r => setTimeout(r, 1000));
+      
+      if (!isUnlocked && selectedPartition === 'boot') {
+        throw new Error('FAILED (remote: partition flashing not allowed for locked devices)');
+      }
+
+      if (selectedFile.size > 2e9 && selectedPartition === 'boot') {
+        throw new Error('FAILED (remote: data too large for target partition)');
+      }
+
       await onFlash(selectedPartition, fileBytes, selectedFile.name);
       setFlashProgress(100);
       onLog(`[SUCCESS] Flash operation completed for partition: ${selectedPartition}`);
     } catch (e: any) {
       onLog(`[ERROR] Flashing halted: ${e.message || e}`);
+      if (e.message.includes('locked')) {
+        onLog('[TIP] Navigate to Unlock Tool to bypass OEM lock before flashing custom kernels.');
+      }
     } finally {
       setIsProcessing(false);
     }

@@ -153,9 +153,9 @@ export class RealWebUsbAdb {
     const header = this.createHeader(ADB_CONSTANTS.A_CNXN, ADB_CONSTANTS.ADB_VERSION, ADB_CONSTANTS.MAX_PAYLOAD, systemIdentity);
 
     // Send Header
-    await this.device.transferOut(this.endpointOut, header.buffer as ArrayBuffer);
+    await this.device.transferOut(this.endpointOut, header as any);
     // Send Payload
-    await this.device.transferOut(this.endpointOut, systemIdentity.buffer as ArrayBuffer);
+    await this.device.transferOut(this.endpointOut, systemIdentity as any);
 
     // Read Response Header (24 bytes)
     const res = await this.device.transferIn(this.endpointIn, 24);
@@ -176,6 +176,61 @@ export class RealWebUsbAdb {
     }
 
     return cmd === ADB_CONSTANTS.A_CNXN ? 'Connected & Authorized' : 'Device Handshake Completed';
+  }
+
+  /**
+   * Execute a shell command and return the output
+   */
+  async shellCommand(command: string): Promise<string> {
+    if (!this.device || !this.isConnected) throw new Error('ADB not connected');
+
+    const cmdEncoded = new TextEncoder().encode(`shell:${command}\0`);
+    const localId = this.localId++;
+    const header = this.createHeader(ADB_CONSTANTS.A_OPEN, localId, 0, cmdEncoded);
+
+    await this.device.transferOut(this.endpointOut, header as any);
+    await this.device.transferOut(this.endpointOut, cmdEncoded as any);
+
+    let output = '';
+    let closed = false;
+    let remoteId = 0;
+
+    // Simplified packet listener for single-shot command
+    while (!closed) {
+      const res = await this.device.transferIn(this.endpointIn, 24);
+      if (res.status === 'ok' && res.data) {
+        const view = new DataView(res.data.buffer);
+        const cmdCode = view.getUint32(0, true);
+        const arg0 = view.getUint32(4, true); // remoteId if OKAY/WRTE
+        const arg1 = view.getUint32(8, true); // localId
+        const dataLen = view.getUint32(12, true);
+
+        if (cmdCode === ADB_CONSTANTS.A_OKAY) {
+          remoteId = arg0;
+          continue;
+        }
+
+        if (cmdCode === ADB_CONSTANTS.A_WRTE && dataLen > 0) {
+          const dataRes = await this.device.transferIn(this.endpointIn, dataLen);
+          if (dataRes.data) {
+            output += new TextDecoder().decode(dataRes.data);
+          }
+          // Acknowledge WRTE with OKAY
+          const okayHeader = this.createHeader(ADB_CONSTANTS.A_OKAY, localId, remoteId, new Uint8Array(0));
+          await this.device.transferOut(this.endpointOut, okayHeader as any);
+        }
+
+        if (cmdCode === ADB_CONSTANTS.A_CLSE) {
+          closed = true;
+          // Send CLSE back to confirm
+          const clseHeader = this.createHeader(ADB_CONSTANTS.A_CLSE, localId, remoteId, new Uint8Array(0));
+          await this.device.transferOut(this.endpointOut, clseHeader as any);
+        }
+      } else {
+        break;
+      }
+    }
+    return output.trim();
   }
 
   /**
