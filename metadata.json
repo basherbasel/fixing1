@@ -1,0 +1,6 @@
+{
+  "name": "Sentinel Mobile Studio — Pro Lab Edition",
+  "description": "Professional mobile hardware diagnostic, WebUSB/Fastboot interface, storage wear assessment, and lab reporting suite.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
